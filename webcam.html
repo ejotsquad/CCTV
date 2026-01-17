@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CCTV - EJOT</title>
+    <link rel="icon" href="https://www.clipartmax.com/png/middle/58-586592_cctv-camera-icon-cctv-icon.png" type="image/x-icon">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.263.0/lucide.min.js"></script>
+    <!-- Pustaka Deteksi Wajah Ringan -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tracking.js/1.1.3/tracking-min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tracking.js/1.1.3/data/face-min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #09090b; color: #fafafa; }
+        .status-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+        canvas { display: none; }
+        #face-canvas { display: block; pointer-events: none; }
+        .scroll-custom::-webkit-scrollbar { width: 5px; }
+        .scroll-custom::-webkit-scrollbar-thumb { background: #27272a; border-radius: 10px; }
+        
+        .cctv-overlay::before {
+            content: " ";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%), 
+                        linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+            background-size: 100% 4px, 3px 100%;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        #video-container:fullscreen {
+            background-color: black;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        #video-container:fullscreen video {
+            max-height: 100vh;
+            width: auto;
+        }
+
+        /* Modal Styles */
+        #photo-modal {
+            transition: opacity 0.3s ease;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col p-4 md:p-8">
+
+    <header class="max-w-6xl mx-auto w-full flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+        <div class="flex items-center gap-3">
+            <div class="bg-red-600 p-2.5 rounded-xl shadow-lg shadow-red-900/20">
+                <i data-lucide="scan-eye" class="text-white w-6 h-6"></i>
+            </div>
+            <div>
+                <h1 class="text-2xl font-bold tracking-tight">CCTV<span class="text-blue-200 text-sm"> by</span> <span class="text-red-500">EJOT</span></h1>
+                <p class="text-xs text-white font-medium uppercase tracking-widest">KAMERA PENDETEKSI GERAKAN</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <button id="cam-power-btn" class="bg-zinc-800 text-white hover:bg-zinc-700 px-4 py-2 rounded-full font-bold text-sm transition flex items-center gap-2">
+                <i data-lucide="power" class="w-4 h-4 text-red-500"></i> <span id="cam-power-text">Nyalakan Kamera</span>
+            </button>
+            <div id="status-badge" class="flex items-center gap-2 bg-zinc-900 border border-zinc-800 px-4 py-2 rounded-full text-xs font-semibold">
+                <span id="badge-dot" class="w-2 h-2 rounded-full bg-zinc-600"></span>
+                <span id="badge-text" class="text-zinc-400">PRATINJAU KAMERA</span>
+            </div>
+            <button id="toggle-btn" class="bg-white text-black hover:bg-zinc-200 px-6 py-2 rounded-full font-bold text-sm transition">
+                Aktifkan Deteksi Gerakan
+            </button>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto w-full grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
+        <!-- Camera Viewport -->
+        <div class="lg:col-span-2 space-y-4">
+            <div id="video-container" class="relative bg-black rounded-3xl border border-zinc-800 overflow-hidden aspect-video shadow-2xl cctv-overlay">
+                <video id="video" autoplay playsinline class="w-full h-full object-cover"></video>
+                
+                <!-- Face Detection Canvas Overlay -->
+                <canvas id="face-canvas" class="absolute inset-0 w-full h-full z-10"></canvas>
+                
+                <!-- Overlays -->
+                <div id="detection-overlay" class="absolute inset-0 border-4 border-red-600 opacity-0 pointer-events-none transition-opacity duration-150 z-20"></div>
+                
+                <div class="absolute top-4 left-4 flex gap-2 z-30 w-full pr-8 justify-between items-start">
+                    <div class="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest flex items-center gap-2">
+                        <a id="live-icon" class="text-md text-red-500">⦿</a> <span id="feed-status">HUBUNGKAN...</span>
+                    </div>
+                    <button id="fullscreen-btn" class="bg-black/40 hover:bg-black/60 backdrop-blur-md p-2 rounded-lg transition">
+                        <i data-lucide="maximize" class="w-4 h-4 text-white"></i>
+                    </button>
+                </div>
+
+                <div id="alert-ui" class="absolute inset-0 bg-red-600/20 flex flex-col items-center justify-center hidden z-30">
+                    <i data-lucide="alert-triangle" class="w-16 h-16 text-red-500 mb-2 animate-bounce"></i>
+                    <h2 class="text-2xl font-black text-white italic">GERAKAN TERDETEKSI!</h2>
+                </div>
+
+                <div id="cam-off-ui" class="absolute inset-0 bg-zinc-950 flex flex-col items-center justify-center z-40">
+                    <i data-lucide="camera-off" class="w-12 h-12 text-zinc-700 mb-2"></i>
+                    <p class="text-zinc-500 font-bold text-sm">KAMERA DIMATIKAN</p>
+                </div>
+            </div>
+
+            <!-- Controls & Settings -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="bg-zinc-900/50 border border-zinc-800 p-4 rounded-2xl">
+                    <label class="text-[10px] font-bold text-zinc-500 uppercase block mb-2">Sensitivitas</label>
+                    <input type="range" id="sensitivity" min="10" max="100" value="40" class="w-full accent-red-600 bg-zinc-800 h-1.5 rounded-lg appearance-none cursor-pointer">
+                    <div class="flex justify-between text-[10px] mt-1 text-zinc-600 font-bold">
+                        <span>RENDAH</span>
+                        <span>TINGGI</span>
+                    </div>
+                </div>
+                <div class="bg-zinc-900/50 border border-zinc-800 p-4 rounded-2xl flex items-center justify-between">
+                    <div>
+                        <label class="text-[10px] font-bold text-zinc-500 uppercase block">Sirine Suara</label>
+                        <span class="text-xs text-zinc-400 font-medium">Aktifkan saat deteksi</span>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="siren-toggle" class="sr-only peer" checked>
+                        <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
+                    </label>
+                </div>
+                <button id="clear-storage" class="bg-zinc-800 hover:bg-red-600/20 text-zinc-300 p-4 rounded-2xl text-xs font-bold transition flex items-center justify-center gap-2 border border-zinc-800 hover:border-red-600/50">
+                    <i data-lucide="trash-2" class="w-4 h-4 text-red-500"></i> HAPUS SEMUA DATA
+                </button>
+            </div>
+        </div>
+
+        <!-- Capture Gallery -->
+        <div class="bg-zinc-900/30 border border-zinc-800 rounded-3xl flex flex-col h-[600px]">
+            <div class="p-6 border-b border-zinc-800 flex items-center justify-between">
+                <h3 class="font-bold flex items-center gap-2">
+                    <i data-lucide="image" class="w-4 h-4 text-red-500"></i>
+                    Tangkapan Gerakan
+                </h3>
+                <span id="capture-count" class="bg-zinc-800 text-[10px] px-2 py-1 rounded-full font-bold">0</span>
+            </div>
+            
+            <div id="gallery" class="flex-1 overflow-y-auto p-4 space-y-4 scroll-custom">
+                <div id="no-data" class="h-full flex flex-col items-center justify-center text-zinc-600 text-center px-8">
+                    <i data-lucide="camera-off" class="w-12 h-12 mb-4 opacity-20"></i>
+                    <p class="text-sm font-medium">Belum ada gerakan terdeteksi</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Popup Modal -->
+    <div id="photo-modal" class="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm hidden flex items-center justify-center p-4">
+        <div class="relative max-w-4xl w-full bg-zinc-900 rounded-3xl border border-zinc-800 overflow-hidden shadow-2xl">
+            <div class="p-4 border-b border-zinc-800 flex items-center justify-between">
+                <div class="flex flex-col">
+                    <span id="modal-time" class="text-xs font-mono text-zinc-400">Timestamp</span>
+                    <span class="text-[10px] font-bold text-red-500 uppercase tracking-widest">Detail Tangkapan</span>
+                </div>
+                <div class="flex gap-2">
+                    <button id="modal-delete-btn" class="bg-red-600/10 hover:bg-red-600/20 text-red-500 p-2 rounded-lg transition border border-red-600/20 flex items-center gap-2 text-xs font-bold">
+                        <i class="w-4 h-4"></i>Hapus Foto
+                    </button>
+                    <button id="modal-close-btn" class="bg-zinc-800 hover:bg-zinc-700 text-white p-2 rounded-lg transition">
+                        <a class="w-4 h-4 hover:font-bold">x</a>
+                    </button>
+                </div>
+            </div>
+            <div class="aspect-video bg-black flex items-center justify-center">
+                <img id="modal-img" src="" class="max-h-full max-w-full object-contain" alt="Preview">
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden Utils -->
+    <canvas id="canvas-process" style="display: none;"></canvas>
+    <canvas id="canvas-capture" style="display: none;"></canvas>
+
+    <script>
+        window.addEventListener('load', () => {
+            const initIcons = () => {
+                if (typeof lucide !== 'undefined') {
+                    lucide.createIcons();
+                }
+            };
+
+            initIcons();
+
+            const video = document.getElementById('video');
+            const videoContainer = document.getElementById('video-container');
+            const canvasProcess = document.getElementById('canvas-process');
+            const canvasCapture = document.getElementById('canvas-capture');
+            const faceCanvas = document.getElementById('face-canvas');
+            const faceCtx = faceCanvas.getContext('2d');
+            const gallery = document.getElementById('gallery');
+            const toggleBtn = document.getElementById('toggle-btn');
+            const camPowerBtn = document.getElementById('cam-power-btn');
+            const fullscreenBtn = document.getElementById('fullscreen-btn');
+            const badgeDot = document.getElementById('badge-dot');
+            const badgeText = document.getElementById('badge-text');
+            const liveIcon = document.getElementById('live-icon');
+            const feedStatus = document.getElementById('feed-status');
+            const alertUI = document.getElementById('alert-ui');
+            const camOffUI = document.getElementById('cam-off-ui');
+            const detectionOverlay = document.getElementById('detection-overlay');
+            const sirenToggle = document.getElementById('siren-toggle');
+            const sensitivityInput = document.getElementById('sensitivity');
+            const captureCountEl = document.getElementById('capture-count');
+            const clearStorageBtn = document.getElementById('clear-storage');
+
+            // Modal elements
+            const photoModal = document.getElementById('photo-modal');
+            const modalImg = document.getElementById('modal-img');
+            const modalTime = document.getElementById('modal-time');
+            const modalCloseBtn = document.getElementById('modal-close-btn');
+            const modalDeleteBtn = document.getElementById('modal-delete-btn');
+
+            let isMonitoring = false;
+            let isCamOn = false;
+            let stream = null;
+            let lastFrameData = null;
+            let detectionTimeout = null;
+            let audioContext = null;
+            let trackerTask = null;
+            let currentModalId = null;
+
+            // Inisialisasi Deteksi Wajah dengan Tracking.js
+            const tracker = new tracking.ObjectTracker('face');
+            tracker.setInitialScale(4);
+            tracker.setStepSize(2);
+            tracker.setEdgesDensity(0.1);
+
+            tracker.on('track', function(event) {
+                faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
+                if (!isCamOn) return;
+
+                event.data.forEach(function(rect) {
+                    faceCtx.strokeStyle = '#22c55e'; // Hijau Emerald
+                    faceCtx.lineWidth = 3;
+                    faceCtx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+                    
+                    faceCtx.fillStyle = '#22c55e';
+                    faceCtx.font = '10px Inter';
+                    faceCtx.fillText('TERDETEKSI: WAJAH', rect.x, rect.y - 5);
+                });
+            });
+
+            async function toggleCamera() {
+                if (isCamOn) {
+                    if (stream) {
+                        stream.getTracks().forEach(track => track.stop());
+                    }
+                    video.srcObject = null;
+                    isCamOn = false;
+                    isMonitoring = false;
+                    camOffUI.classList.remove('hidden');
+                    document.getElementById('cam-power-text').textContent = "Nyalakan Kamera";
+                    updateUI(false);
+                    feedStatus.textContent = "KAMERA OFF";
+                    liveIcon.classList.replace('text-green-500', 'text-zinc-500');
+                    faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
+                    if (trackerTask) trackerTask.stop();
+                } else {
+                    try {
+                        stream = await navigator.mediaDevices.getUserMedia({ 
+                            video: { width: { ideal: 1280 }, height: { ideal: 720 } } 
+                        });
+                        video.srcObject = stream;
+                        isCamOn = true;
+                        camOffUI.classList.add('hidden');
+                        document.getElementById('cam-power-text').textContent = "Matikan Kamera";
+                        liveIcon.classList.replace('text-zinc-500', 'text-green-500');
+                        feedStatus.textContent = "LIVE FEED AKTIF";
+                        
+                        video.onloadedmetadata = () => {
+                            faceCanvas.width = video.videoWidth;
+                            faceCanvas.height = video.videoHeight;
+                            trackerTask = tracking.track('#video', tracker);
+                        };
+                    } catch (err) {
+                        console.error("Camera error:", err);
+                        alert("Gagal mengakses kamera. Pastikan izin diberikan.");
+                    }
+                }
+            }
+
+            function playSiren() {
+                if (!sirenToggle.checked) return;
+                if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                
+                const osc = audioContext.createOscillator();
+                const gain = audioContext.createGain();
+                
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(440, audioContext.currentTime);
+                osc.frequency.linearRampToValueAtTime(880, audioContext.currentTime + 0.2);
+                osc.frequency.linearRampToValueAtTime(440, audioContext.currentTime + 0.4);
+                
+                gain.gain.setValueAtTime(0.1, audioContext.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.8);
+                
+                osc.connect(gain);
+                gain.connect(audioContext.destination);
+                
+                osc.start();
+                osc.stop(audioContext.currentTime + 0.8);
+            }
+
+            function updateUI(monitoring) {
+                if (monitoring) {
+                    toggleBtn.textContent = "Hentikan Deteksi";
+                    toggleBtn.classList.replace('bg-white', 'bg-red-600');
+                    toggleBtn.classList.add('text-white');
+                    badgeDot.className = "w-2 h-2 rounded-full bg-red-600 status-pulse";
+                    badgeText.className = "text-red-500 uppercase font-bold";
+                    badgeText.textContent = "SISTEM PENJAGA AKTIF";
+                    liveIcon.classList.replace('text-green-500', 'text-red-500');
+                } else {
+                    toggleBtn.textContent = "Aktifkan Deteksi Gerakan";
+                    toggleBtn.classList.replace('bg-red-600', 'bg-white');
+                    toggleBtn.classList.remove('text-white');
+                    badgeDot.className = "w-2 h-2 rounded-full bg-red-600";
+                    badgeText.className = "text-zinc-400 uppercase font-semibold";
+                    badgeText.textContent = isCamOn ? "PRATINJAU KAMERA" : "KAMERA MATI";
+                    if (isCamOn) liveIcon.classList.replace('text-red-500', 'text-green-500');
+                    alertUI.classList.add('hidden');
+                }
+            }
+
+            function detectMotion() {
+                if (!isMonitoring || !isCamOn) return;
+
+                const width = 1; 
+                const height = 1;
+                canvasProcess.width = width;
+                canvasProcess.height = height;
+                const ctx = canvasProcess.getContext('2d', { willReadFrequently: true });
+                
+                ctx.drawImage(video, 0, 0, width, height);
+                const currentFrame = ctx.getImageData(0, 0, width, height);
+                
+                if (lastFrameData) {
+                    let diff = 0;
+                    const threshold = 101 - sensitivityInput.value; 
+
+                    for (let i = 0; i < currentFrame.data.length; i += 4) {
+                        const rDiff = Math.abs(currentFrame.data[i] - lastFrameData.data[i]);
+                        const gDiff = Math.abs(currentFrame.data[i+1] - lastFrameData.data[i+1]);
+                        const bDiff = Math.abs(currentFrame.data[i+2] - lastFrameData.data[i+2]);
+                        
+                        if ((rDiff + gDiff + bDiff) / 3 > threshold) {
+                            diff++;
+                        }
+                    }
+
+                    if (diff > (width * height * 0.02)) {
+                        triggerDetection();
+                    }
+                }
+
+                lastFrameData = currentFrame;
+                requestAnimationFrame(detectMotion);
+            }
+
+            function triggerDetection() {
+                if (detectionTimeout) return; 
+
+                alertUI.classList.remove('hidden');
+                detectionOverlay.classList.replace('opacity-0', 'opacity-100');
+                playSiren();
+                captureImage();
+
+                detectionTimeout = setTimeout(() => {
+                    alertUI.classList.add('hidden');
+                    detectionOverlay.classList.replace('opacity-100', 'opacity-0');
+                    detectionTimeout = null;
+                }, 2000);
+            }
+
+            function captureImage() {
+                if (!isCamOn) return;
+                const ctx = canvasCapture.getContext('2d');
+                canvasCapture.width = video.videoWidth;
+                canvasCapture.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0);
+                
+                const dataURL = canvasCapture.toDataURL('image/jpeg', 0.5);
+                const timestamp = new Date().toLocaleString('id-ID');
+                
+                const capture = { id: Date.now(), image: dataURL, time: timestamp };
+                
+                let captures = JSON.parse(localStorage.getItem('motion_captures') || '[]');
+                captures.unshift(capture);
+                
+                // Batas maksimal 20 foto
+                if (captures.length > 20) captures.pop();
+                
+                localStorage.setItem('motion_captures', JSON.stringify(captures));
+                renderGallery();
+            }
+
+            function renderGallery() {
+                const captures = JSON.parse(localStorage.getItem('motion_captures') || '[]');
+                captureCountEl.textContent = captures.length;
+                
+                if (captures.length === 0) {
+                    gallery.innerHTML = `
+                        <div id="no-data" class="h-full flex flex-col items-center justify-center text-zinc-600 text-center px-8">
+                            <i data-lucide="camera-off" class="w-12 h-12 mb-4 opacity-20"></i>
+                            <p class="text-sm font-medium">Belum ada gerakan terdeteksi</p>
+                        </div>
+                    `;
+                    initIcons();
+                    return;
+                }
+
+                gallery.innerHTML = captures.map(cap => `
+                    <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden group animate-in fade-in zoom-in duration-300 cursor-pointer hover:border-red-600/50 transition shadow-lg" onclick="openPhotoModal(${cap.id})">
+                        <img src="${cap.image}" class="w-full aspect-video object-cover" alt="Capture">
+                        <div class="p-3 flex items-center justify-between bg-zinc-900/80 backdrop-blur-sm">
+                            <span class="text-[10px] font-mono text-zinc-500">${cap.time}</span>
+                            <div class="text-red-500 opacity-0 group-hover:opacity-100 transition">
+                                <i data-lucide="zoom-in" class="w-4 h-4"></i>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+                
+                initIcons();
+            }
+
+            // Modal Logic
+            window.openPhotoModal = (id) => {
+                const captures = JSON.parse(localStorage.getItem('motion_captures') || '[]');
+                const photo = captures.find(c => c.id === id);
+                if (photo) {
+                    currentModalId = id;
+                    modalImg.src = photo.image;
+                    modalTime.textContent = photo.time;
+                    photoModal.classList.remove('hidden');
+                    document.body.style.overflow = 'hidden';
+                    initIcons();
+                }
+            };
+
+            const closePhotoModal = () => {
+                photoModal.classList.add('hidden');
+                document.body.style.overflow = 'auto';
+                currentModalId = null;
+            };
+
+            modalCloseBtn.addEventListener('click', closePhotoModal);
+            photoModal.addEventListener('click', (e) => {
+                if (e.target === photoModal) closePhotoModal();
+            });
+
+            modalDeleteBtn.addEventListener('click', () => {
+                if (currentModalId) {
+                    deleteSingle(currentModalId);
+                    closePhotoModal();
+                }
+            });
+
+            window.deleteSingle = (id) => {
+                let captures = JSON.parse(localStorage.getItem('motion_captures') || '[]');
+                captures = captures.filter(c => c.id !== id);
+                localStorage.setItem('motion_captures', JSON.stringify(captures));
+                renderGallery();
+            };
+
+            // Hapus Semua Data Aktif
+            clearStorageBtn.addEventListener('click', () => {
+                const captures = JSON.parse(localStorage.getItem('motion_captures') || '[]');
+                if (captures.length === 0) return;
+
+                if (confirm("Apakah Anda yakin ingin menghapus SEMUA gambar tangkapan gerakan?")) {
+                    localStorage.removeItem('motion_captures');
+                    renderGallery();
+                }
+            });
+
+            toggleBtn.addEventListener('click', () => {
+                if (!isCamOn) {
+                    alert("Nyalakan kamera terlebih dahulu!");
+                    return;
+                }
+                isMonitoring = !isMonitoring;
+                updateUI(isMonitoring);
+                if (isMonitoring) {
+                    requestAnimationFrame(detectMotion);
+                }
+            });
+
+            camPowerBtn.addEventListener('click', toggleCamera);
+
+            fullscreenBtn.addEventListener('click', () => {
+                if (!document.fullscreenElement) {
+                    videoContainer.requestFullscreen().catch(err => {
+                        alert(`Gagal mengaktifkan mode layar penuh: ${err.message}`);
+                    });
+                } else {
+                    document.exitFullscreen();
+                }
+            });
+
+            // Jalankan Galeri pada awal
+            renderGallery();
+        });
+    </script>
+</body>
+</html>
